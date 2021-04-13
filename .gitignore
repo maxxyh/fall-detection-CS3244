@@ -127,3 +127,12 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+Archive/
+.vscode/
+project.pdf
+URFD_opticalflow/*
+models/*
+saved_features/*
+weights.h5
+flow
