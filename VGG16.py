@@ -53,7 +53,7 @@ training_ratio = 0.8 #portion of data used for training and valuation
 test_ratio = 0.2 #portion of data used for testing
 threshold = 0.5 # Threshold to classify between positive and negative
 total_num_folds = 4
-lowest_trainable_layer = -2
+lowest_trainable_layer = -3
 
 #for keeping track of fold performance
 sensitivities = []
