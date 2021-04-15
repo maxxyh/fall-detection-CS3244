@@ -1,5 +1,6 @@
 from numpy.random import seed
 seed(1)
+import random
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
@@ -36,7 +37,7 @@ os.environ["CUDA_VISIBLE_DEVICES"]="1"
 
 # CHANGE THESE VARIABLES ---
 data_folder = 'URFD_opticalflow/'
-mean_file = 'flow_mean.mat'
+plots_folder = 'VGG16_plots/'
 vgg_16_weights = 'weights.h5'
 best_model_path = 'VGG16_best_model/' #directory to store best model
 fold_best_model_path = '' #to be determined by k-fold cross validation
@@ -47,12 +48,12 @@ save_plots = True
 learning_rate = 0.0001
 mini_batch_size = 32
 weight_0 = 1
-epochs = 10
-learning_rate = 0.0001
+epochs = 20
 training_ratio = 0.8 #portion of data used for training and valuation
 test_ratio = 0.2 #portion of data used for testing
 threshold = 0.5 # Threshold to classify between positive and negative
 total_num_folds = 4
+lowest_trainable_layer = -2
 
 #for keeping track of fold performance
 sensitivities = []
@@ -69,15 +70,29 @@ fall_path = data_folder + 'Falls/'
 not_fall_path = data_folder + 'NotFalls/'
 
 #==============Func to filter out short videos=================
-num_frames = 20 #20 is set to function with provided weights
+def remove_x(lst):
+    if 'x' in lst:
+        return False
+    else:
+        return True
+
+def remove_y(lst):
+    if 'y' in lst:
+        return False
+    else:
+        return True
+
+num_frames = 10 #10 is set to function with provided weights
+
 def is_sufficient_len(vid_path):
     img_paths = os.listdir(vid_path)
-    return len(img_paths) > num_frames
+    return len(list(filter(remove_y,img_paths))) > num_frames and len(list(filter(remove_x,img_paths))) > num_frames
 
 #================Assign <x, c(x)> to dictionary================
 data_paths = [] #data paths used from training and valuation
 test_data_paths = [] #data paths used for testing
 fall_vids = [fall_path + vid for vid in os.listdir(fall_path)]
+random.shuffle(fall_vids)
 
 for vids in fall_vids[:int(training_ratio * (len(fall_vids)))]:
     if is_sufficient_len(vids):
@@ -92,7 +107,7 @@ for vids in fall_vids[int(training_ratio * (len(fall_vids))) : int((training_rat
         test_data_paths.append(vids)
 
 not_fall_vids = [not_fall_path + vid for vid in os.listdir(not_fall_path)]
-
+random.shuffle(not_fall_vids)
 
 for vids in not_fall_vids[:int(training_ratio * (len(fall_vids)))]:
     if is_sufficient_len(vids):
@@ -106,16 +121,46 @@ for vids in not_fall_vids[int(training_ratio * (len(fall_vids))) : int((training
         label_assignment.update(case)
         test_data_paths.append(vids)
 
+'''for path in test_data_paths:
+    if path in data_paths:
+        print(path)
+    else:
+        print('/')'''
+
 #==============Func to break list of frames into mutiple batches of 20 frames=================
-def sample(lst):
+
+def sample(full_lst):
+    #print()
+    #print(len(full_lst))
+    lst_x = list(filter(remove_y, full_lst))
+    #print(len(lst_x))
     output = []
-    if len(lst) < num_frames:
-        return ouput
-    interval_size = len(lst)// num_frames
+    interval_size = len(lst_x)// (num_frames)
+    #print(interval_size)
     starting_frame = 0
-    while starting_frame <= len(lst) - interval_size * 20:
-        output.append(lst[starting_frame::interval_size][0:20])
+    frames_added = 0
+    batches_added = 0
+    #print(len(lst_x) - interval_size * (num_frames - 1) - 1)
+    while starting_frame <= len(lst_x) - interval_size * (num_frames - 1) - 1:
+        #print(starting_frame)
+        batch = []
+        curr_frame = starting_frame
+        counter = 0
+        while counter < 10:
+            batch .append(lst_x[curr_frame])
+            batch .append(lst_x[curr_frame].replace('x', 'y', 1))
+            frames_added += 2
+            #print(lst_x[curr_frame])
+            #print(lst_x[curr_frame].replace('x', 'y', 1))
+            curr_frame += interval_size
+            counter += 1
+        #print(len(batch))
         starting_frame += 1
+        output.append(batch)
+        batches_added += 1
+    #print(len(output))
+    #print(frames_added)
+    #print(batches_added)
     return output
 #===============build input instances===============================
 def build_data(paths):
@@ -140,8 +185,12 @@ def build_data(paths):
     return np.array(x), np.array(y)
 
 x_val, y_val = build_data(test_data_paths) #build data sets for evaluation
-print(x_val.shape)
-print(y_val.shape)
+print('test_data_paths: ')
+print(test_data_paths)
+print('y_val: ')
+print(y_val.flatten().tolist())
+#print(x_val.shape)
+#print(y_val.shape)
 #======================function to plot graph===============
 def plot_training_info(case, metrics, save, history):
     '''
@@ -203,12 +252,8 @@ def run(train, test, fold_number):
     global fold_best_model_path
     x_train, y_train = build_data(train)
     x_test, y_test = build_data(test)
-    print(x_train.shape)
-    print(y_train.shape)
-    print(x_test.shape)
-    print(y_test.shape)
     #print(x_train.shape)
-    #rint(y_train.shape)
+    #print(y_train.shape)
     #print(x_test.shape)
     #print(y_test.shape)
     # ========================================================================
@@ -276,7 +321,6 @@ def run(train, test, fold_number):
         w2 = w2[::-1, ::-1, :, :]
         b2 = np.asarray(b2)
         layer_dict[layer].set_weights((w2, b2))
-        layer_dict[layer].trainable = False
 
     # Copy the weights of the first fully-connected layer (fc6)
     layer = layerscaffe[-3]
@@ -284,7 +328,9 @@ def run(train, test, fold_number):
     w2 = np.transpose(np.asarray(w2), (1,0))
     b2 = np.asarray(b2)
     layer_dict[layer].set_weights((w2, b2))
-    layer_dict[layer].trainable = False
+
+    for layer in layerscaffe[:lowest_trainable_layer]:
+        layer_dict[layer].trainable = False
 
     adam = Adam(lr=learning_rate, beta_1=0.9, beta_2=0.999,
         epsilon=1e-08)
@@ -337,14 +383,31 @@ def run(train, test, fold_number):
         class_weight=class_weight,
         callbacks=callbacks
     )
+    # Name of the experiment
+    exp = 'urfd_lr{}_batchs{}_batchnorm{}_w0_{}'.format(
+        learning_rate,
+        mini_batch_size,
+        batch_norm,
+        weight_0
+    )
+
+    plot_training_info(plots_folder + exp, ['accuracy', 'loss'],
+        save_plots, history.history)
     #================testing=========================================================
     classifier = load_model(fold_best_model_path)
+    print('loading from' + fold_best_model_path)
     predicted = classifier.predict(x_val)
     for i in range(len(predicted)):
         if predicted[i] < threshold:
             predicted[i] = 0
         else:
             predicted[i] = 1
+    #print('predicted')
+    #print(predicted)
+    #print('y_val')
+    #print(y_val)
+
+
     # Array of predictions 0/1
     predicted = np.asarray(predicted).astype(int)
     # Compute metrics and print them
